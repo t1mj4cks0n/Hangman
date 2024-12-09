@@ -15,7 +15,6 @@ except ImportError:
     subprocess.run(["pip", "install", "wonderwords"])
     print("...wonderwords installed")
 
-
 #=======================================
 # Configuration
 #=======================================
@@ -25,13 +24,20 @@ config = configparser.ConfigParser()
 
 if not os.path.exists(config_file):
     config["Word Settings"] = {
-        "length_of_easy_word": "8",         
-        "length_of_normal_word": "10",
-        "length_of_hard_word": "15"
+        "easy word length": "8",         
+        "normal word length": "10",
+        "hard word length": "15"
+    }
+    config["Score Multipliers"] = {
+        "add points per correct letter": "100",
+        "sub points per wrong letter": "50",
+        "allowed seconds per letter": "5",
+        "add/sub points per second to finish": "5",
+        "add points for winning": "500"
     }
     config["Password Settings"] = {
-        "min_password_length": "8",
-        "incorrect_password_attempts": "3"
+        "min password length": "8",
+        "incorrect password attempts": "3"
     }
     config["Game Settings"] = {
         "clear_screen": "True",
@@ -46,15 +52,18 @@ else:
     print("Config file found, loading settings...")
 
 # config["Word Settings"]
-length_of_easy_word = int(config["Word Settings"]["length_of_easy_word"])
-length_of_normal_word = int(config["Word Settings"]["length_of_normal_word"])
-length_of_hard_word = int(config["Word Settings"]["length_of_hard_word"])
-repeat_easy_letters = config["Word Settings"].getboolean("allow_repeat_letters_in_easy_words")
-repeat_normal_letters = config["Word Settings"].getboolean("allow_repeat_letters_in_normal_words")
-repeat_hard_letters = config["Word Settings"].getboolean("allow_repeat_letters_in_hard_words")
+length_of_easy_word = int(config["Word Settings"]["easy word length"])
+length_of_normal_word = int(config["Word Settings"]["normal word length"])
+length_of_hard_word = int(config["Word Settings"]["hard word length"])
+# config["Score Multipliers"]
+correct_letters_multiplier = int(config["Score Multipliers"]["add points per correct letter"])
+wrong_letter_multiplier = int(config["Score Multipliers"]["sub points per wrong letter"])
+grace_period_multiplier = int(config["Score Multipliers"]["allowed seconds per letter"])
+time_points_multiplier = int(config["Score Multipliers"]["add/sub points per second to finish"])
+win_multiplier = int(config["Score Multipliers"]["add points for winning"])
 # config["Password Settings"]
-min_password_length = int(config["Password Settings"]["min_password_length"])
-incorrect_password_attempts = int(config["Password Settings"]["incorrect_password_attempts"])
+min_password_length = int(config["Password Settings"]["min password length"])
+incorrect_password_attempts = int(config["Password Settings"]["incorrect password attempts"])
 # config["Game Settings"]
 clear_screen = config["Game Settings"].getboolean("clear_screen")
 show_word = config["Game Settings"].getboolean("show_word")
@@ -321,53 +330,57 @@ def calc_elapsed_time(start_time, end_time):
     elapsed_time_seconds = elapsed_time.total_seconds()
     return round(elapsed_time_seconds, 2)
 
-def calc_score(name, loss, wrong_letters, remaining_letters, hidden_hangman, hangman_word, elapsed_time):
+def calc_score(name, loss, wrong_letters, hidden_hangman, hangman_word, elapsed_time):
     """
     calculates the score of the game based on: 
     # + points for correct letters guessed (per letter in hidden_hangman)
     # - points for wrong letters (per leeter in wrong_letters)
-    # + points remaining letters in alphabet_letters
     # - points for time taken after grace period
 
     Args: 
         wrong_letters (list): list of wrong letters
-        remaining_letters (list): list of remaining letters
         hidden_hangman (list): the hangman word with correct letters filled in
         hangman_word (str): the word to guess
         elapsed_time (float): the time taken to complete the game
 
     returns: list: dictionary of the score data, string: formatted score summary
     """
-    # base line score
-    baseline = 0
-    # number of correct guessed letters
-    correct_guessed_letters = len(hidden_hangman) - hidden_hangman.count("_")
-    # add 10 pts for each letter in the hangman word, giving you the highest possible score
-    len_hangman = baseline + correct_guessed_letters * 10 
-    # INDIVIDUAL SUM  5 pts for each wrong letter
-    wrong_letter_score = len(wrong_letters) * 5 
-    # subtract 5 pts for each wrong letter
-    len_wrong = len_hangman - wrong_letter_score 
-    # INDIVIDUAL SUM  of adds 2 pts for each remaining letter in alphabet_letters
-    remain_letter_score = wrong_letter_score + len(remaining_letters) * 2 
-    # adds 2 pts for each remaining letter in alphabet_letters
-    len_remain = len_wrong + remain_letter_score 
-    # 5 seconds per letter in the hangman word
-    grace_period = len(hangman_word) * 5 
-    if round(elapsed_time) <= grace_period: # round to an integer
-        time_score =  0
-    else:
-        time_score = (round(elapsed_time) - grace_period) * 5
-        if time_score < baseline:
-            time_score = baseline
 
-    time_calc = len_remain - time_score # adds the time score to the remaining letters score
-    total_score = time_calc
+
+    grace_period = len(hangman_word) * grace_period_multiplier # grace period in seconds
+
+    # if player is faster than grace period
+    if round(elapsed_time) < grace_period: # round to an integer
+        time_score = (grace_period - round(elapsed_time)) * time_points_multiplier
+        time_string = f"\t+{time_score} pts for faster than grace period.\n"
+
+    # if player is slower than grace period
+    elif round(elapsed_time) > grace_period:
+        time_score = -(round(elapsed_time) - grace_period) * time_points_multiplier
+        time_string = f"\t{time_score} pts for slower than grace period.\n"
+
+    # if player is average
+    else:
+        time_score = 0
+        time_string = f"\t{time_score} pts for being an average guesser.\n"
+    print(f"time_score: {time_score}\n Calculated by:\t(round time:{round(elapsed_time)} - {grace_period}) * 5")
+
+    # BASIC CALCULATIONS
+    correct_letters_score = (len(hidden_hangman) - hidden_hangman.count("_")) * correct_letters_multiplier # number of correct guessed letters calculated
+    wrong_letters_score = len(wrong_letters) * wrong_letter_multiplier # number of wrong letters calculated
+
+    # TOTAL SCORE TRACKING
+    total_score = 0 # start with 0 points
+    total_score += correct_letters_score # add correct letter score
+    total_score -= wrong_letters_score # subtract wrong letter score
+    total_score += time_score # add time score
+
 
     if loss == True:
         win = False
         finished = "Lost"
     else:
+        total_score += win_multiplier
         win = True
         finished = "Won"
 
@@ -375,13 +388,14 @@ def calc_score(name, loss, wrong_letters, remaining_letters, hidden_hangman, han
                         f"YOU {finished}!\nHangman word was: {hangman_word.upper()}\n"
                         f"Score Summarised:\n"
                         f"{"#"*20}\n"
-                        f"\t  {baseline} pts baseline\n"
+                        f"\t  0 pts baseline\n"
                         "Additional Scores:\n"
-                        f"\t+ {len_hangman} pts (+10pts per correct letter in '{hangman_word}')\n"
-                        f"\t+ {remain_letter_score} pts (+2pts per remaining letters, {len(remaining_letters)} unused letters)\n"
+                        f"\t+ {correct_letters_score} pts (+{correct_letters_multiplier} pts per correct letter in '{hangman_word}')\n"
+                        f"\t{('+ ' + str(win_multiplier) + ' pts for winning') if win else '0 pts for losing'}\n"
                         "Penalties:\n"
-                        f"\t- {wrong_letter_score} pts (-5pts per wrong letters, \'{",".join(wrong_letters)}\')\n"
-                        f"\t- {time_score} pts (-5pts per second over grace period of {grace_period} seconds)\n"
+                        f"\t- {wrong_letters_score} pts (-{wrong_letter_multiplier} per wrong letters, \'{",".join(wrong_letters)}\')\n"
+                        "Time Penalties/Bonuses:\n"
+                        f"{time_string}"
                         "Total Score:\n"
                         f"\t= {total_score} pts\n"
                         f"{"#"*20}\n"
@@ -394,10 +408,8 @@ def calc_score(name, loss, wrong_letters, remaining_letters, hidden_hangman, han
         "hangman_word":hangman_word,
         "guessed_word":"".join(hidden_hangman),
         "word_difficulty": (lambda word_length: [key[1] for key, value in difficulty_word_length.items() if value == word_length][0])(word_length),
-        "score_wrong_letters":wrong_letter_score,
+        "score_wrong_letters":wrong_letters_score,
         "total_wrong_letters":len(wrong_letters),
-        "score_remaining_letters":remain_letter_score,
-        "total_remaining_letters":len(remaining_letters),
         "time_taken":elapsed_time,
         "score_time_taken":time_score
             }, score_summarised)
@@ -664,7 +676,7 @@ while play_again == True:
     #=======================================
     # Save Score
     print("Saving Game Score...")
-    game_stats = calc_score(play_name, lost, wrong_letters, alphabet_list, hidden_hangman, hangman_word, elapsed_time)[0]
+    game_stats = calc_score(play_name, lost, wrong_letters, hidden_hangman, hangman_word, elapsed_time)[0]
     save_statistics_to_json(file_name, game_stats)
 
     # Update Player Stats
@@ -672,7 +684,7 @@ while play_again == True:
     update_player_stats(play_name, game_stats)
 
     # Display score
-    print(calc_score(play_name, lost, wrong_letters, alphabet_list, hidden_hangman, hangman_word, elapsed_time)[1])
+    print(calc_score(play_name, lost, wrong_letters, hidden_hangman, hangman_word, elapsed_time)[1])
 
     # Display Leaderboard
     get_all_time_leaderboard()
@@ -692,11 +704,9 @@ while play_again == True:
 
 """
 Issues:
-
+1. Time Score Calculation
 
 Future Features:
-1. Display leaderboards
-2. Display player stats
 3. Display player achievements
 4. allow player to change password
 5. allow player to delete account
